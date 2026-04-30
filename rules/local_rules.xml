@@ -1,1 +1,174 @@
-.
+<!-- ============================================================ -->
+<!-- CVE-2026-31431 - Copy Fail - Detection Rules                 -->
+<!-- Ref: https://copy.fail/                                      -->
+<!-- Environment: Wazuh 4.14.4 + auditd                          -->
+<!-- Tested on: Ubuntu / Kali / RHEL / SUSE / Amazon Linux 2023  -->
+<!-- Author: Kislley Rodrigues                                    -->
+<!--                                                              -->
+<!-- Rule chain architecture:                                     -->
+<!--                                                              -->
+<!-- 80700 (decoded_as=auditd)                                    -->
+<!--   92600 (if_group=audit + exe=python) [depth 1]             -->
+<!--     199600 (if_sid=92600 + key=af_alg)   [depth 2]          -->
+<!--     199601 (if_sid=92600 + key=splice)   [depth 2]          -->
+<!--       199604 (if_sid=199601 +             [depth 3] CRITICAL -->
+<!--               if_matched_sid=199600 +                        -->
+<!--               same pid / 120s)                               -->
+<!--   199602 (if_sid=80700 + key=execve_su)  [depth 1]          -->
+<!--   199603 (if_sid=80700 + key=modload)    [depth 1]          -->
+<!--   199605 (if_sid=80700 + key=af_alg)     [depth 1]          -->
+<!--   199606 (if_sid=80700 + key=splice)     [depth 1]          -->
+<!--     199607 (if_sid=199606 +              [depth 2] CRITICAL  -->
+<!--             if_matched_sid=199605 +                          -->
+<!--             same pid / 120s)                                 -->
+<!--                                                              -->
+<!-- IMPORTANT: Rules 199600 and 199601 must be children of rule  -->
+<!-- 92600 (Python process execution), NOT of 80700 (auditd       -->
+<!-- anchor). The Wazuh rule engine follows one chain path per    -->
+<!-- event. Since the PoC uses Python, rule 92600 matches first   -->
+<!-- at depth 1. Placing detection rules at depth 2 under 92600   -->
+<!-- guarantees they win chain evaluation over competing sibling   -->
+<!-- rules (e.g. 92603-92606 in 0850-audit_rules.xml).           -->
+<!--                                                              -->
+<!-- uid!=0 covers: regular users, service accounts (www-data,   -->
+<!-- postgres, jenkins, etc.), containers, and web shells with no -->
+<!-- login session - not just interactive users.                  -->
+<!-- ============================================================ -->
+
+<group name="audit,linux,lpe,cve_2026_31431,">
+
+  <!-- ===========================================================
+       SIGNAL 1: AF_ALG socket - python chain (depth 2 under 92600)
+       Necessary condition of the exploit chain. Covers the
+       732-byte Python stdlib PoC (os, socket, zlib).
+       Validated: exe=/usr/bin/python3.13 (Kali), python3.12 (lab)
+       =========================================================== -->
+  <rule id="199600" level="10">
+    <if_sid>92600</if_sid>
+    <field name="audit.key">copy_fail_af_alg</field>
+    <description>CVE-2026-31431 (Copy Fail): AF_ALG socket (type 38) created by non-root process [$(audit.exe)]</description>
+    <mitre>
+      <id>T1068</id>
+    </mitre>
+    <group>pci_dss_10.2.7,gdpr_IV_35.7.d,hipaa_164.312.b,nist_800_53_AU.14,tsc_CC7.2,</group>
+  </rule>
+
+  <!-- ===========================================================
+       SIGNAL 2: splice() - python chain (depth 2 under 92600)
+       syscall 275 (x86_64). Delivers page cache pages to the
+       AF_ALG socket writable scatterlist. This is the exploit
+       trigger - pages bypass VFS and enter the kernel crypto SGL.
+       =========================================================== -->
+  <rule id="199601" level="10">
+    <if_sid>92600</if_sid>
+    <field name="audit.key">copy_fail_splice</field>
+    <description>CVE-2026-31431 (Copy Fail): splice() syscall by non-root process [$(audit.exe)]</description>
+    <mitre>
+      <id>T1068</id>
+    </mitre>
+    <group>pci_dss_10.2.7,gdpr_IV_35.7.d,</group>
+  </rule>
+
+  <!-- ===========================================================
+       SIGNAL 3: /usr/bin/su execution - default exploit target
+       The audit.ppid field is critical for triage. A Python or
+       unusual parent process is a strong indicator of exploitation.
+       The page-cache-corrupted binary runs as UID 0.
+       =========================================================== -->
+  <rule id="199602" level="6">
+    <if_sid>80700</if_sid>
+    <field name="audit.key">copy_fail_execve_su</field>
+    <description>CVE-2026-31431 (Copy Fail): /usr/bin/su executed - review parent process [$(audit.exe)]</description>
+    <mitre>
+      <id>T1068</id>
+    </mitre>
+  </rule>
+
+  <!-- ===========================================================
+       SIGNAL 4: modprobe/kmod execution
+       Watches /usr/bin/kmod - the real binary behind the modprobe
+       symlink on Debian/Ubuntu/Kali (/sbin/modprobe -> /bin/kmod).
+       Catches manual or triggered attempts to load algif_aead.
+       Note: algif_aead may also auto-load via kernel request_module()
+       on the first socket(AF_ALG) + bind() without explicit modprobe.
+       =========================================================== -->
+  <rule id="199603" level="12">
+    <if_sid>80700</if_sid>
+    <field name="audit.key">copy_fail_modload</field>
+    <description>CVE-2026-31431 (Copy Fail): modprobe execution detected - possible algif_aead load attempt [exe=$(audit.exe) comm=$(audit.command)]</description>
+    <mitre>
+      <id>T1068</id>
+    </mitre>
+  </rule>
+
+  <!-- ===========================================================
+       CORRELATION - PYTHON: child of 199601
+       Fires when splice() follows AF_ALG socket from the SAME pid
+       within 120 seconds. Indicates full exploit chain execution.
+       The 5-second gap between AF_ALG and splice() in the PoC
+       loop is sufficient for the engine to store rule 199600
+       before this correlation evaluates.
+       Validated: pid=46784 (Kali GNU/Linux 2026.1, python3.13)
+                  pid=53447 (Ubuntu 24.04.2, python3.12)
+       =========================================================== -->
+  <rule id="199604" level="15" timeframe="120">
+    <if_sid>199601</if_sid>
+    <if_matched_sid>199600</if_matched_sid>
+    <same_field>audit.pid</same_field>
+    <description>CVE-2026-31431 (Copy Fail) EXPLOIT CHAIN DETECTED: AF_ALG socket + splice() from same python process [pid=$(audit.pid) exe=$(audit.exe)] - IMMEDIATE INVESTIGATION REQUIRED</description>
+    <mitre>
+      <id>T1068</id>
+    </mitre>
+    <group>pci_dss_10.2.7,gdpr_IV_35.7.d,hipaa_164.312.b,nist_800_53_AU.14,tsc_CC6.8,tsc_CC7.2,</group>
+  </rule>
+
+  <!-- ===========================================================
+       SIGNAL 1b: AF_ALG socket - non-python processes
+       Covers exploit variants recompiled in C, Go, Rust, or
+       delivered via web shells with no Python dependency.
+       Validated with gcc-compiled test binary (test_af_alg.c).
+       =========================================================== -->
+  <rule id="199605" level="10">
+    <if_sid>80700</if_sid>
+    <field name="audit.key">copy_fail_af_alg</field>
+    <description>CVE-2026-31431 (Copy Fail): AF_ALG socket (type 38) created by non-root non-python process [$(audit.exe)]</description>
+    <mitre>
+      <id>T1068</id>
+    </mitre>
+    <group>pci_dss_10.2.7,gdpr_IV_35.7.d,hipaa_164.312.b,nist_800_53_AU.14,tsc_CC7.2,</group>
+  </rule>
+
+  <!-- ===========================================================
+       SIGNAL 2b: splice() - non-python processes
+       Individual splice() signal for non-python processes.
+       Provides standalone visibility for partial exploit execution,
+       reconnaissance, or adapted variants (C/Go/Rust/shell).
+       =========================================================== -->
+  <rule id="199606" level="10">
+    <if_sid>80700</if_sid>
+    <field name="audit.key">copy_fail_splice</field>
+    <description>CVE-2026-31431 (Copy Fail): splice() syscall by non-root non-python process [$(audit.exe)]</description>
+    <mitre>
+      <id>T1068</id>
+    </mitre>
+    <group>pci_dss_10.2.7,gdpr_IV_35.7.d,</group>
+  </rule>
+
+  <!-- ===========================================================
+       CORRELATION - NON-PYTHON: child of 199606
+       Fires when splice() follows AF_ALG socket from the SAME pid
+       within 120 seconds (non-Python process).
+       Validated: pid=53639 (Ubuntu 24.04.2, gcc-compiled C binary)
+       =========================================================== -->
+  <rule id="199607" level="15" timeframe="120">
+    <if_sid>199606</if_sid>
+    <if_matched_sid>199605</if_matched_sid>
+    <same_field>audit.pid</same_field>
+    <description>CVE-2026-31431 (Copy Fail) EXPLOIT CHAIN DETECTED: AF_ALG socket + splice() from same non-python process [pid=$(audit.pid) exe=$(audit.exe)] - IMMEDIATE INVESTIGATION REQUIRED</description>
+    <mitre>
+      <id>T1068</id>
+    </mitre>
+    <group>pci_dss_10.2.7,gdpr_IV_35.7.d,hipaa_164.312.b,nist_800_53_AU.14,tsc_CC6.8,tsc_CC7.2,</group>
+  </rule>
+
+</group>
