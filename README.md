@@ -1,6 +1,6 @@
 # COPY FAIL Detection with Wazuh 4.14.4 - CVE-2026-31431
 
-> **Detection engineering for the Copy Fail kernel LPE · Wazuh 4.14.4 · auditd · Ubuntu / RHEL / SUSE / Amazon Linux 2023 / Kali**
+> **Detection engineering for the Copy Fail kernel LPE · Ubuntu / RHEL / SUSE / Amazon Linux 2023 / Kali**
 
 ![rules](https://img.shields.io/badge/wazuh_rules-8-brightgreen)
 ![sca](https://img.shields.io/badge/SCA_checks-4-blue)
@@ -87,7 +87,7 @@ All Linux distributions shipping kernels since commit `72548b093ee3` (2017) are 
 ## Repository Structure
 
 ```
-copy-fail-detection/
+COPY-FAIL-Detection-with-Wazuh-4.14.4/
 │
 ├── rules/
 │   └── local_rules.xml              # 8 Wazuh detection rules (199600-199607)
@@ -99,7 +99,13 @@ copy-fail-detection/
 │   └── cve_2026_31431.yml           # SCA policy - kernel-version independent
 │
 └── docs/
-    └── (screenshots, technical notes)
+    ├── pentlab_uid.png               # PoC execution - root obtained on Kali
+    ├── Rule-199604-TRIGs.png         # Rule 199604 - 80 hits on pentlab
+    ├── Rule_199604_Wazuh_Server_only.png  # Rule 199604 - first validation
+    ├── Splice_-_Non-root_process.png # Rules 199600/199601/199604 firing
+    ├── Modprobe_-_Possible_Algif_aed_load_attempt.png  # Rule 199603
+    ├── Pentlab-PoC.png               # Rule 199603 on pentlab agent
+    └── SCA_CVE-2026-31431.png        # SCA policy score 75%
 ```
 
 ---
@@ -186,10 +192,17 @@ Expected output:
 
 ### Step 3 - Deploy Wazuh detection rules
 
+The rules are provided in `rules/local_rules.xml`. You can either merge the content into your existing `/var/ossec/etc/rules/local_rules.xml` or deploy as a standalone file:
+
 ```bash
-# Append to your local_rules.xml or deploy as standalone
+# Option A - standalone file
 cp rules/local_rules.xml /var/ossec/etc/rules/cve-2026-31431_rules.xml
 
+# Option B - append to local_rules.xml
+cat rules/local_rules.xml >> /var/ossec/etc/rules/local_rules.xml
+```
+
+```bash
 # Validate syntax - must exit 0 with zero warnings
 /var/ossec/bin/wazuh-analysisd -t 2>&1 | tail -5
 
@@ -201,12 +214,17 @@ systemctl restart wazuh-manager
 
 ```bash
 cp sca/cve_2026_31431.yml /var/ossec/etc/shared/default/
+```
 
-# Add to ossec.conf <sca> block:
-# <policies>
-#   <policy>/var/ossec/etc/shared/default/cve_2026_31431.yml</policy>
-# </policies>
+Add to `ossec.conf` inside the `<sca>` block:
 
+```xml
+<policies>
+  <policy>/var/ossec/etc/shared/default/cve_2026_31431.yml</policy>
+</policies>
+```
+
+```bash
 systemctl restart wazuh-manager
 ```
 
@@ -253,16 +271,55 @@ grep -E "31431|cve_2026" /var/ossec/logs/alerts/alerts.log | tail -10
 
 Expected SCA score (unmitigated system): **75%** (3 passed / 1 failed - algif_aead not blacklisted)
 
-### Production validation evidence
+---
 
-This ruleset was validated end-to-end with the public PoC on Kali GNU/Linux 2026.1 (Wazuh agent 002, `pentlab`, kernel 6.18.12+kali-amd64):
+## Production Validation Evidence
 
-```
-$ su - testuser -c "python3 /tmp/copy_fail_exp.py"
-# id ; whoami
-uid=0(root) gid=1000(m0us3r) groups=1000(m0us3r),...
-root
-```
+### PoC Execution - Root obtained on Kali (pentlab)
+
+`testuser (uid=1001)` executed the 732-byte PoC and obtained root shell:
+
+![PoC - Root obtained on Kali](docs/pentlab_uid.png)
+
+---
+
+### Rule 199604 - EXPLOIT CHAIN DETECTED (pentlab, 80 hits)
+
+AF_ALG socket + splice() from same python process - pid=46784 - IMMEDIATE INVESTIGATION REQUIRED:
+
+![Rule 199604 - pentlab 80 hits](docs/Rule-199604-TRIGs.png)
+
+---
+
+### Rule 199604 - First validation (Wazuh server, pid=53447)
+
+![Rule 199604 - Wazuh server](docs/Rule_199604_Wazuh_Server_only.png)
+
+---
+
+### Rules 199600 / 199601 / 199604 - splice() and AF_ALG firing
+
+![Splice and AF_ALG - Non-root process](docs/Splice_-_Non-root_process.png)
+
+---
+
+### Rule 199603 - modprobe execution detected (93 hits)
+
+![Modprobe - Possible algif_aead load attempt](docs/Modprobe_-_Possible_Algif_aed_load_attempt.png)
+
+---
+
+### Rule 199603 - pentlab agent (35 hits)
+
+![Pentlab - Rule 199603](docs/Pentlab-PoC.png)
+
+---
+
+### SCA Policy - Score 75% (3 passed / 1 failed)
+
+![SCA CVE-2026-31431](docs/SCA_CVE-2026-31431.png)
+
+---
 
 **Wazuh Dashboard Discover results (agent=pentlab, Today)**:
 
@@ -343,8 +400,8 @@ zypper update kernel-default
 
 ## Author
 
-**Kislley Rodrigues**
-Kislley Rodrigues (m0us3r)
+**Kislley Rodrigues (m0us3r)**
+Wazuh Ambassador | Detection Engineering | Blue Team
 
 ---
 
