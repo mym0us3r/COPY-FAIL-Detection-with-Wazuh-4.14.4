@@ -1,1 +1,104 @@
+# Security Configuration Assessment
+# CVE-2026-31431 (Copy Fail) - Attack Surface Assessment
+# Author: Kislley Rodrigues
+# Ref: https://copy.fail/ | https://xint.io/blog/copy-fail-linux-distributions
+#
+# Checks whether the algif_aead attack surface is exposed and whether
+# behavioral detection via auditd is deployed.
+# Does NOT rely on kernel version - purely behavioral and configuration checks.
+# Valid for: Ubuntu, Debian, RHEL, Amazon Linux 2023, SUSE, Kali.
 
+policy:
+  id: "cve_2026_31431"
+  file: "cve_2026_31431.yml"
+  name: "CVE-2026-31431 (Copy Fail) - Attack Surface Assessment"
+  description: "Verifies whether the algif_aead kernel module is exposed and whether auditd behavioral detection is deployed. Does not rely on kernel version checks. Valid for all major Linux distributions."
+  references:
+    - "https://copy.fail/"
+    - "https://xint.io/blog/copy-fail-linux-distributions"
+
+requirements:
+  title: "Check Linux system."
+  description: "Requirements for running the SCA scan against Linux systems."
+  condition: all
+  rules:
+    - "f:/etc/os-release"
+    - "f:/proc/sys/kernel/ostype -> Linux"
+
+checks:
+
+  # CHECK 1: algif_aead must not be loaded in memory
+  # If loaded, any unprivileged user can immediately trigger the exploit.
+  # No auto-load needed - attack surface is active and immediate.
+  - id: 31431001
+    title: "Ensure algif_aead kernel module is not loaded in memory."
+    description: "The algif_aead module is currently loaded. Any local unprivileged user can open an AF_ALG socket and trigger CVE-2026-31431 without requiring module auto-load. Risk: CRITICAL."
+    rationale: "algif_aead loaded = immediate attack surface. The exploit requires only Python 3.10+ stdlib (os, socket, zlib). No compilation, no dependencies, 732 bytes."
+    remediation: "Run: rmmod algif_aead 2>/dev/null; echo 'install algif_aead /bin/false' > /etc/modprobe.d/disable-algif-aead.conf - Then apply kernel patch including mainline commit a664bf3d603d."
+    compliance:
+      - mitre_mitigations: ["M1019", "M1051"]
+      - mitre_tactics: ["TA0004"]
+      - mitre_techniques: ["T1068"]
+      - pci_dss_v4.0: ["6.3.3", "6.4.1"]
+      - nist_sp_800-53: ["SI-2", "CM-7"]
+    condition: none
+    rules:
+      - "c:lsmod -> r:algif_aead"
+
+  # CHECK 2: algif_aead must be disabled via modprobe.d
+  # Even if not currently loaded, auto-load is enabled by default.
+  # The kernel loads algif_aead transparently on the first bind() call.
+  # This check passes when at least one mitigation is in place.
+  - id: 31431002
+    title: "Ensure algif_aead kernel module is disabled via modprobe.d."
+    description: "The algif_aead module is available for auto-load. The kernel loads it transparently when a process calls socket(AF_ALG) + bind(authencesn). An unprivileged user can trigger this auto-load silently. Risk: HIGH."
+    rationale: "Kernel module auto-loading is enabled by default on all major distributions. Blacklisting via modprobe.d prevents the module from being loaded by any means, including auto-load triggered by unprivileged processes."
+    remediation: "Run: echo 'install algif_aead /bin/false' > /etc/modprobe.d/disable-algif-aead.conf - Then apply kernel patch including mainline commit a664bf3d603d."
+    compliance:
+      - mitre_mitigations: ["M1019", "M1051"]
+      - mitre_tactics: ["TA0004"]
+      - mitre_techniques: ["T1068"]
+      - pci_dss_v4.0: ["6.3.3", "6.4.1"]
+      - nist_sp_800-53: ["SI-2", "CM-7"]
+    condition: any
+    rules:
+      - "c:modprobe -n -v algif_aead -> r:install /bin/false|install /bin/true|Module algif_aead not found"
+      - "d:/etc/modprobe.d/ -> r:\\.*.conf -> r:install\\s+algif_aead\\s+/bin/false"
+      - "d:/etc/modprobe.d/ -> r:\\.*.conf -> r:^blacklist\\s+algif_aead"
+
+  # CHECK 3: auditd must be active
+  # Without auditd, Wazuh cannot detect socket(AF_ALG), splice() or execve()
+  # behavioral signals for this CVE.
+  - id: 31431003
+    title: "Ensure auditd is active and running."
+    description: "auditd is not running. Without it, Wazuh cannot detect the CVE-2026-31431 behavioral signals: socket(AF_ALG), splice() syscall, or /usr/bin/su execution. This is an independent detection gap regardless of patch status."
+    rationale: "auditd is the primary sensor for syscall-level LPE detection in Wazuh. Its absence removes all behavioral visibility for this CVE and for other privilege escalation techniques."
+    remediation: "Ubuntu/Debian/Kali: apt install auditd audispd-plugins -y && systemctl enable --now auditd - RHEL/Amazon Linux: yum install audit -y && systemctl enable --now auditd - SUSE: zypper install audit -y && systemctl enable --now auditd"
+    compliance:
+      - mitre_mitigations: ["M1047"]
+      - mitre_tactics: ["TA0004"]
+      - mitre_techniques: ["T1068"]
+      - pci_dss_v4.0: ["10.2.1", "10.3.1"]
+      - nist_sp_800-53: ["AU-2", "AU-12"]
+    condition: all
+    rules:
+      - "c:systemctl is-active auditd -> r:^active$"
+
+  # CHECK 4: CVE-2026-31431 auditd sensor rules must be deployed
+  # Verifies that the specific detection rules for this CVE are in place.
+  # Without these rules, auditd collects generic data but does not tag
+  # the AF_ALG, splice() and su signals required by Wazuh rules 199600-199607.
+  - id: 31431004
+    title: "Ensure CVE-2026-31431 auditd sensor rules are deployed."
+    description: "The auditd rules file for CVE-2026-31431 is not present. Without it, the AF_ALG socket creation, splice() syscall, and /usr/bin/su execution are not tagged with the keys required by Wazuh detection rules 199600-199607."
+    rationale: "Wazuh detection rules 199600-199607 depend on specific auditd keys (copy_fail_af_alg, copy_fail_splice, copy_fail_execve_su, copy_fail_modload) generated by the sensor rules in /etc/audit/rules.d/cve-2026-31431.rules."
+    remediation: "Deploy the auditd sensor rules file to /etc/audit/rules.d/cve-2026-31431.rules and run augenrules --load. Rules available at: https://github.com/mym0us3r/copy-fail-detection"
+    compliance:
+      - mitre_mitigations: ["M1047"]
+      - mitre_tactics: ["TA0004"]
+      - mitre_techniques: ["T1068"]
+      - pci_dss_v4.0: ["10.2.1", "10.3.1"]
+      - nist_sp_800-53: ["AU-2", "AU-12"]
+    condition: all
+    rules:
+      - "f:/etc/audit/rules.d/cve-2026-31431.rules"
