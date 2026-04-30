@@ -299,13 +299,13 @@ AF_ALG socket + splice() from same python process - pid=46784 - IMMEDIATE INVEST
 
 ### Rules 199600 / 199601 / 199604 - splice() and AF_ALG firing
 
-![Splice and AF_ALG - Non-root process](docs/Splice_-_Non-root_process.png)
+![Splice and AF_ALG - Non-root process](docs/Splice-non-root-process.png)
 
 ---
 
 ### Rule 199603 - modprobe execution detected (93 hits)
 
-![Modprobe - Possible algif_aead load attempt](docs/Modprobe_-_Possible_Algif_aed_load_attempt.png)
+![Modprobe - Possible algif_aead load attempt](docs/Modprobe-Possible-Algif-aed-load-attempt.png)
 
 ---
 
