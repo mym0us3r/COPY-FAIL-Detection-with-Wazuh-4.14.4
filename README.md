@@ -279,7 +279,7 @@ Expected SCA score (unmitigated system): **75%** (3 passed / 1 failed - algif_ae
 
 `testuser (uid=1001)` executed the 732-byte PoC and obtained root shell:
 
-![PoC - Root obtained on Kali](docs/pentlab_uid.png)
+![PoC - Root obtained on Kali](docs/pentlabuid.png)
 
 ---
 
