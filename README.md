@@ -12,7 +12,7 @@
 
 ## What is Copy Fail?
 
-CVE-2026-31431 is a logic bug in the Linux kernel's `authencesn` cryptographic template. It allows any unprivileged local user to perform a **deterministic, controlled 4-byte write into the page cache** of any readable file on the system — without requiring race conditions, kernel offsets, or elevated privileges.
+CVE-2026-31431 is a logic bug in the Linux kernel's `authencesn` cryptographic template. It allows any unprivileged local user to perform a **deterministic, controlled 4-byte write into the page cache** of any readable file on the system - without requiring race conditions, kernel offsets, or elevated privileges.
 
 A **732-byte Python 3.10+ script** using only standard library modules (`os`, `socket`, `zlib`) exploits the vulnerability to obtain root on all major Linux distributions shipped since 2017.
 
@@ -63,6 +63,8 @@ Step 4: splice()          [!]   TRIGGER - page cache pages enter writable SGL
 Step 5: recv()                  authencesn writes seqno_lo into page cache
 Step 6: execve(/usr/bin/su)     Corrupted setuid binary runs shellcode as UID 0
 ```
+
+![CVE-2026-31431 Exploit Chain](https://raw.githubusercontent.com/mym0us3r/COPY-FAIL-Detection-with-Wazuh-4.14.4/refs/heads/main/docs/exploit_chain_timeline.svg)
 
 `splice()` is the critical step. It delivers page cache pages into the AF_ALG socket's writable scatterlist without copying — a 2017 in-place optimization in `algif_aead.c` that made pages from the pipe buffer reusable in the destination SGL. When `authencesn.decrypt()` runs, it writes into those pages, which happen to be the page cache of your target file.
 
@@ -414,3 +416,16 @@ Wazuh Ambassador | Detection Engineering | Blue Team
 ---
 
 *Detection rules, auditd sensor configuration and SCA policy validated on Wazuh 4.14.4, Ubuntu 24.04.2 LTS (kernel 6.8.0-106-generic) and Kali GNU/Linux 2026.1 (kernel 6.18.12+kali-amd64).*
+
+---
+
+## Update 2026-05-03
+
+| Source | Link |
+|---|---|
+| CISA Adds Actively Exploited Linux Root Access Bug CVE-2026-31431 to KEV | https://thehackernews.com/2026/05/cisa-adds-actively-exploited-linux-root.html |
+| Known Exploited Vulnerabilities Catalog | https://www.cisa.gov/known-exploited-vulnerabilities-catalog |
+| CVE-2026-31431 -  crypto: algif_aead - Revert to operating out-of-place | https://www.cve.org/CVERecord?id=CVE-2026-31431 |
+
+---
+
