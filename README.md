@@ -107,6 +107,7 @@ COPY-FAIL-Detection-with-Wazuh-4.14.4/
     ├── Splice_-_Non-root_process.png # Rules 199600/199601/199604 firing
     ├── Modprobe_-_Possible_Algif_aed_load_attempt.png  # Rule 199603
     ├── Pentlab-PoC.png               # Rule 199603 on pentlab agent
+    ├── exploit_chain_timeline.svg    # Exploit Chain
     └── SCA_CVE-2026-31431.png        # SCA policy score 75%
 ```
 
