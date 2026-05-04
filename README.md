@@ -66,7 +66,7 @@ Step 6: execve(/usr/bin/su)     Corrupted setuid binary runs shellcode as UID 0
 
 ![CVE-2026-31431 Exploit Chain](https://raw.githubusercontent.com/mym0us3r/COPY-FAIL-Detection-with-Wazuh-4.14.4/refs/heads/main/docs/exploit_chain_timeline.svg)
 
-`splice()` is the critical step. It delivers page cache pages into the AF_ALG socket's writable scatterlist without copying — a 2017 in-place optimization in `algif_aead.c` that made pages from the pipe buffer reusable in the destination SGL. When `authencesn.decrypt()` runs, it writes into those pages, which happen to be the page cache of your target file.
+`splice()` is the critical step. It delivers page cache pages into the AF_ALG socket's writable scatterlist without copying - a 2017 in-place optimization in `algif_aead.c` that made pages from the pipe buffer reusable in the destination SGL. When `authencesn.decrypt()` runs, it writes into those pages, which happen to be the page cache of your target file.
 
 ---
 
@@ -430,3 +430,11 @@ Wazuh Ambassador | Detection Engineering | Blue Team
 
 ---
 
+---
+
+## Wazuh
+
+This project was developed as part of the [Wazuh Ambassador Program](https://wazuh.com/ambassadors-program/?utm_source=ambassadors&utm_medium=referral&utm_campaign=ambassadors+program).
+
+Wazuh is a free, open source security platform that provides unified XDR and SIEM protection.
+Learn more at [wazuh.com](https://wazuh.com/?utm_source=ambassadors&utm_medium=referral&utm_campaign=ambassadors+program).
